@@ -1,2 +1,5 @@
 # Mac Files
 *.DS_Store
+
+# Maelstrom Setup
+/maelstrom/
