@@ -3,14 +3,25 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"sync"
 
 	maelstrom "github.com/jepsen-io/maelstrom/demo/go"
 )
 
+// Mutex for map
+type map_access struct {
+	mu sync.RWMutex
+	msgs map[int]struct{}
+}
+
 func main() {
 	n := maelstrom.NewNode()
-	var topology map[string]any
-	messages := make(map[int]struct{})
+	var typed struct {
+		Topology map[string][]string `json:"topology"`
+	}
+	messages := &map_access{
+		msgs: make(map[int]struct{}),
+	}
 
 	// Topology handler
 	n.Handle("topology", func(msg maelstrom.Message) error {
@@ -19,8 +30,8 @@ func main() {
 			return err
 		}
 
-		json.Unmarshal(msg.Body, &topology)
-		
+		json.Unmarshal(msg.Body, &typed)
+
 		body["type"] = "topology_ok"
 		delete(body, "topology")
 		return n.Reply(msg, body)
@@ -34,12 +45,23 @@ func main() {
 		}
 
 		// Update messages received
-		if _, exists := messages[int(body["message"].(float64))]; !exists {
-			messages[int(body["message"].(float64))] = struct{}{}
+		messages.mu.Lock()
+		defer messages.mu.Unlock()
+		if _, exists := messages.msgs[int(body["message"].(float64))]; !exists {
+			messages.msgs[int(body["message"].(float64))] = struct{}{}
+
+			// Propagate broadcast to neighbors
+			topology := typed.Topology
+			for i := range topology[n.ID()] {
+				new_body := map[string]any {
+					"type": "broadcast",
+					"message": int(body["message"].(float64)),
+				} 
+				n.RPC(topology[n.ID()][i], new_body, func(msg maelstrom.Message) error {
+					return nil
+				})
+			}
 		}
-
-		// Propagate broadcast to neighbors
-
 
 		body["type"] = "broadcast_ok"
 		delete(body, "message")
@@ -55,8 +77,10 @@ func main() {
 		}
 
 		// Convert message hashset to list
-		list := make([]int, 0, len(messages))
-		for key := range messages {
+		messages.mu.RLock()
+		defer messages.mu.RUnlock()
+		list := make([]int, 0, len(messages.msgs))
+		for key := range messages.msgs {
 			list = append(list, key)
 		}
 

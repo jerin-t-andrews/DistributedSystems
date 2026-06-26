@@ -49,3 +49,5 @@
     - **Q: How can we guarantee that no node receives the same broadcast request twice?**
         - In our custom broadcast message should we add an extra key that keeps track of the nodes that have already received a message already? This way the number of messages sent is just O(n), the number of nodes.
         - Otherwise we will send messages to every node multiple times and it double checks its received messages to see if it needs to send the message. This is the naive and easier approach, but it is more inefficient
+    - I missed one obvious part of this solution, we are using a set to keep track of received messages, but since the handlers are all concurrent, we need a mutex to wrap the interactions with the set
+        - I used a read-write-mutex since we want to allow for multiple read calls to execute at the same times, but only one write call should be allowed to update the set
